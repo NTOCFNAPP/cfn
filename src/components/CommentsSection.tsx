@@ -63,7 +63,7 @@ export function CommentsSection() {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase ml-1">Seu Nome / CRN</label>
+              <label className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase ml-1">Seu Nome / CRN *</label>
               <div className="relative">
                 <User className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <input
@@ -72,19 +72,21 @@ export function CommentsSection() {
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Ex: Nutricionista João..."
                   className="w-full rounded-2xl border border-border/40 bg-background/40 px-11 py-3 text-sm outline-none transition-all focus:border-primary/50 focus:ring-4 focus:ring-primary/5"
+                  required
                 />
               </div>
             </div>
           </div>
           <div className="space-y-1.5">
-             <label className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase ml-1">Sua Observação ou Dúvida</label>
+             <label className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase ml-1">Sua Observação ou Dúvida *</label>
              <textarea
                 value={newText}
                 onChange={(e) => setNewText(e.target.value)}
                 placeholder="Escreva aqui seu comentário sobre os gastos..."
                 rows={3}
                 className="w-full rounded-2xl border border-border/40 bg-background/40 px-6 py-4 text-sm outline-none transition-all focus:border-primary/50 focus:ring-4 focus:ring-primary/5 resize-none"
-             />
+                required            
+            />
           </div>
           <button
             type="submit"
