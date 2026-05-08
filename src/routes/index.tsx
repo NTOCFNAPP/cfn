@@ -6,20 +6,13 @@ import {
   PieChart,
   ResponsiveContainer,
   Tooltip as RTooltip,
-  Bar,
-  BarChart,
-  XAxis,
-  YAxis,
 } from "recharts";
 import {
   Wallet,
   Plane,
-  Briefcase,
   HelpCircle,
   ChevronDown,
   Building2,
-  GraduationCap,
-  Cog,
   ShieldCheck,
   Calendar,
   TrendingDown,
@@ -32,8 +25,12 @@ import {
   FileText,
   Tag,
   CreditCard,
+  Sparkles,
+  Info,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { GoogleGenAI } from "@google/genai";
+import ReactMarkdown from "react-markdown";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Popover,
@@ -46,6 +43,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { type Transaction } from "@/lib/transactions";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -83,7 +81,7 @@ function AnimatedNumber({ value }: { value: number }) {
   const [displayValue, setDisplayValue] = useState(0);
 
   useEffect(() => {
-    let start = 0;
+    const start = 0;
     const end = value;
     const duration = 1500;
     const startTime = performance.now();
@@ -158,12 +156,53 @@ function SectionTitle({
 const FILTERS = ["Hoje", "Mensal", "Anual"] as const;
 type Filter = (typeof FILTERS)[number];
 
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
 function Dashboard() {
   const [filter, setFilter] = useState<Filter>("Mensal");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+  const [selectedTxExplanation, setSelectedTxExplanation] = useState<string | null>(null);
+  const [explaining, setExplaining] = useState(false);
+  const [showRaw, setShowRaw] = useState(false);
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const explainTransaction = async (tx: Transaction) => {
+    try {
+      setExplaining(true);
+      setSelectedTxExplanation(null);
+
+      const prompt = `Analise este gasto do Conselho Federal de Nutrição (CFN) e explique de forma simples e direta o que ele representa. 
+      Se o valor parecer anormal (muito alto), mencione que pode ser um erro de sistema ou um gasto consolidado de grupo.
+      
+      DETALHES DO GASTO:
+      Favorecido: ${tx.favorecido}
+      Cargo: ${tx.cargo}
+      Valor: ${BRL(tx.valor)}
+      Categoria: ${tx.categoria}
+      Descrição: ${tx.descricao}
+      Origem: ${tx.origem}
+      Roteiro: ${tx.origemDestino || "N/A"}
+      
+      DADOS BRUTOS DO BANCO:
+      ${JSON.stringify(tx.raw, null, 2)}
+      
+      Responda em português brasileiro, mantendo um tom de auditoria técnica mas acessível. Use Markdown.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+      });
+
+      setSelectedTxExplanation(response.text || "Não foi possível gerar uma explicação no momento.");
+    } catch (error) {
+      console.error("Erro ao explicar gasto:", error);
+      setSelectedTxExplanation("Erro ao conectar com a Inteligência de Auditoria.");
+    } finally {
+      setExplaining(false);
+    }
+  };
 
   const fetchRealData = async () => {
     try {
@@ -181,12 +220,10 @@ function Dashboard() {
       if (pError) console.error("Erro passagens:", pError);
       if (dError) console.error("Erro deslocamentos:", dError);
 
-      // 3. Mapear e Unificar com parsing robusto de valores e chaves
-      const findVal = (obj: Record<string, any>, patterns: string[]): any => {
+      // 3. Helpers de Parsing
+      const findVal = (obj: Record<string, unknown>, patterns: string[]): unknown => {
         if (!obj) return null;
         const keys = Object.keys(obj);
-        
-        // 1. Busca exata (ignorando case e underscores)
         const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
         
         for (const p of patterns) {
@@ -195,18 +232,16 @@ function Dashboard() {
           if (found && obj[found] !== null && obj[found] !== undefined) return obj[found];
         }
         
-        // 2. Busca por proximidade parcial
         for (const p of patterns) {
           const np = normalize(p);
           const found = keys.find(k => normalize(k).includes(np));
           if (found && obj[found] !== null && obj[found] !== undefined) return obj[found];
         }
-
         return null;
       };
 
-      const parseValue = (obj: Record<string, any>, keys: string[]): number => {
-        const _parse = (raw: any): number => {
+      const parseValue = (obj: Record<string, unknown>, keys: string[]): number => {
+        const _parse = (raw: unknown): number => {
           if (raw === null || raw === undefined || raw === "") return 0;
           if (typeof raw === "number") return raw;
           const clean = String(raw).replace(/[^\d.,-]/g, "").trim();
@@ -230,12 +265,10 @@ function Dashboard() {
           const num = _parse(val);
           if (num > 0) return num;
         }
-
-        const fallback = findVal(obj, keys);
-        return _parse(fallback);
+        return _parse(findVal(obj, keys));
       };
 
-      const parseCargo = (obj: Record<string, any>, keys: string[]): string => {
+      const parseCargo = (obj: Record<string, unknown>, keys: string[]): string => {
         const val = findVal(obj, keys);
         if (!val) return "Colaborador";
         const s = String(val).trim();
@@ -243,53 +276,49 @@ function Dashboard() {
         return s;
       };
 
-      const parseDate = (obj: Record<string, any>, keys: string[]): string => {
+      const parseDate = (obj: Record<string, unknown>, keys: string[]): string => {
         const raw = findVal(obj, keys);
         if (!raw) return new Date().toISOString();
-        
         const str = String(raw);
         if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str;
-
         const match = str.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-        if (match) {
-          return `${match[3]}-${match[2]}-${match[1]}`;
-        }
-
+        if (match) return `${match[3]}-${match[2]}-${match[1]}`;
         return new Date(str).toISOString();
       };
 
-      const mappedPassagens: Transaction[] = (passagens || []).map((p: any) => {
+      // 4. Mapeamento
+      const mappedPassagens: Transaction[] = (passagens || []).map((p: Record<string, unknown>) => {
         const totalDespesas = parseValue(p, ["ValorTotalDespesas", "ValorTotal", "Valor"]);
         const tarifas = parseValue(p, ["TotalTarifas", "Tarifa", "Valor"]);
         return {
-          id: findVal(p, ["Id", "IdProcesso", "id_pk", "IdProcessoPassagem"]) || `p-${Math.random()}`,
+          id: String(findVal(p, ["Id", "IdProcesso", "id_pk", "IdProcessoPassagem"]) || `p-${Math.random()}`),
           data: parseDate(p, ["DataIdaEVoltaFormatada", "DataHoraIda"]),
           cargo: parseCargo(p, ["TipoPassageiro", "Cargo", "Ocupacao"]),
           categoria: `Passagem: ${findVal(p, ["CiaAerea", "Companhia"]) || "Aérea"}`,
-          favorecido: findVal(p, ["NomePassageiro", "Nome"]) || "Anônimo",
+          favorecido: String(findVal(p, ["NomePassageiro", "Nome"]) || "Anônimo"),
           valor: totalDespesas || tarifas || 0,
-          descricao: findVal(p, ["NomeEventoFormatado", "Descricao"]) || "Viagem institucional",
-          origem: findVal(p, ["CodigoProcesso", "Num_Processo"]) || "Processo N/A",
-          ciaAerea: findVal(p, ["CiaAerea", "Companhia"]),
+          descricao: String(findVal(p, ["NomeEventoFormatado", "Descricao"]) || "Viagem institucional"),
+          origem: String(findVal(p, ["CodigoProcesso", "Num_Processo"]) || "Processo N/A"),
+          ciaAerea: String(findVal(p, ["CiaAerea", "Companhia"]) || ""),
           totalTarifas: tarifas,
-          origemDestino: findVal(p, ["OrigemDestinoFormatado", "Rota"]),
+          origemDestino: String(findVal(p, ["OrigemDestinoFormatado", "Rota"]) || ""),
           valorTotalDespesas: totalDespesas,
           raw: p
         };
       });
 
-      const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: any) => {
+      const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: Record<string, unknown>) => {
         const totalDespesas = parseValue(d, ["ValorTotalDespesas", "ValorTotal", "Valor"]);
         const diarias = parseValue(d, ["Diaria", "vl_diaria", "Valor"]);
         return {
-          id: findVal(d, ["Id", "id", "id_pk"]) || `d-${Math.random()}`,
+          id: String(findVal(d, ["Id", "id", "id_pk"]) || `d-${Math.random()}`),
           data: parseDate(d, ["DataHoraIda", "Data"]),
           cargo: parseCargo(d, ["TipoPassageiro", "Cargo", "Vinculo"]),
           categoria: "Deslocamento / Diária",
-          favorecido: findVal(d, ["NomePassageiro", "Nome"]) || "Anônimo",
+          favorecido: String(findVal(d, ["NomePassageiro", "Nome"]) || "Anônimo"),
           valor: totalDespesas || diarias || 0,
-          descricao: findVal(d, ["NomeDespesaPadrao", "Motivo", "Descricao"]) || "Despesas de deslocamento",
-          origem: findVal(d, ["NomeEventoFormatado", "Evento"]) || "Evento N/A",
+          descricao: String(findVal(d, ["NomeDespesaPadrao", "Motivo", "Descricao"]) || "Despesas de deslocamento"),
+          origem: String(findVal(d, ["NomeEventoFormatado", "Evento"]) || "Evento N/A"),
           valorTotalDespesas: totalDespesas || diarias,
           raw: d
         };
@@ -808,106 +837,231 @@ function Dashboard() {
            </Card>
         </section>
 
-        {/* AUDITORIA SOCIAL - COMENTÁRIOS */}
-        <section className="grid gap-6">
-           <CommentsSection />
-        </section>
+        {/* AUDITORIA SOCIAL - COMENTÁRIOS */}        <Dialog
+          open={!!selectedTx}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSelectedTx(null);
+              setSelectedTxExplanation(null);
+              setShowRaw(false);
+            }
+          }}
+        >
+          <DialogContent className="max-w-2xl overflow-hidden border-primary/20 bg-card/95 p-0 backdrop-blur-2xl">
+            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-primary via-accent to-primary" />
 
-        {/* TRANSACTION DETAIL DIALOG */}
-        <Dialog open={!!selectedTx} onOpenChange={(open) => !open && setSelectedTx(null)}>
-          <DialogContent className="max-w-xl border-primary/20 bg-card/95 p-0 overflow-hidden backdrop-blur-2xl">
-            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-primary via-accent to-primary" />
-            
             <DialogHeader className="p-8 pb-4">
-              <DialogTitle className="flex items-center gap-3 font-display text-2xl font-black uppercase italic tracking-tight">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <ShieldCheck className="h-6 w-6" />
+              <DialogTitle className="flex items-center justify-between">
+                <div className="flex items-center gap-3 font-display text-2xl font-black italic tracking-tight uppercase">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <ShieldCheck className="h-6 w-6" />
+                  </div>
+                  Dossiê de Movimentação
                 </div>
-                Dossiê de Movimentação
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowRaw(!showRaw)}
+                  className="font-mono text-[9px] min-w-24 uppercase tracking-widest text-muted-foreground"
+                >
+                  {showRaw ? "Ver Resumo" : "Dados Brutos"}
+                </Button>
               </DialogTitle>
             </DialogHeader>
 
             {selectedTx && (
-              <div className="space-y-6 p-8 pt-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5 rounded-2xl border border-border/40 bg-muted/30 p-4">
-                     <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Valor Auditado</p>
-                     <p className="font-display text-2xl font-black text-primary">{BRL(selectedTx.valor)}</p>
+              <div className="custom-scrollbar max-h-[80vh] space-y-6 overflow-y-auto p-8 pt-4">
+                {showRaw ? (
+                  <div className="rounded-2xl border border-border/40 bg-black/20 p-4 font-mono text-[10px] leading-relaxed">
+                    <pre className="whitespace-pre-wrap text-muted-foreground">
+                      {JSON.stringify(selectedTx.raw, null, 2)}
+                    </pre>
                   </div>
-                  <div className="space-y-1.5 rounded-2xl border border-border/40 bg-muted/30 p-4">
-                     <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Data da Operação</p>
-                     <p className="font-display text-lg font-bold">{new Date(selectedTx.data).toLocaleDateString("pt-BR")}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex items-start gap-4">
-                    <User className="mt-1 h-5 w-5 text-primary" />
-                    <div>
-                      <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Favorecido / Cargo</p>
-                      <p className="font-display text-lg font-black leading-tight uppercase">{selectedTx.favorecido}</p>
-                      <p className="font-mono text-[10px] text-muted-foreground uppercase font-bold">{selectedTx.cargo}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-4">
-                    <Tag className="mt-1 h-5 w-5 text-primary" />
-                    <div>
-                      <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Categoria / Evento</p>
-                      <p className="text-sm font-bold uppercase">{selectedTx.categoria}</p>
-                      <p className="text-sm text-foreground/80">{selectedTx.descricao}</p>
-                    </div>
-                  </div>
-
-                  {selectedTx.origemDestino && (
-                    <div className="flex items-start gap-4">
-                      <MapPin className="mt-1 h-5 w-5 text-primary" />
-                      <div>
-                        <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Roteiro / Trecho</p>
-                        <p className="text-sm font-bold uppercase">{selectedTx.origemDestino}</p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5 rounded-2xl border border-border/40 bg-muted/30 p-4">
+                        <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">
+                          Valor Auditado
+                        </p>
+                        <p className="font-display text-2xl font-black text-primary">
+                          {BRL(selectedTx.valor)}
+                        </p>
+                      </div>
+                      <div className="space-y-1.5 rounded-2xl border border-border/40 bg-muted/30 p-4 text-right">
+                        <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">
+                          Data da Operação
+                        </p>
+                        <p className="font-display text-lg font-bold">
+                          {new Date(selectedTx.data).toLocaleDateString(
+                            "pt-BR",
+                          )}
+                        </p>
                       </div>
                     </div>
-                  )}
 
-                  <div className="flex items-start gap-4">
-                    <FileText className="mt-1 h-5 w-5 text-primary" />
-                    <div>
-                      <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Documento de Origem</p>
-                      <p className="text-sm font-bold uppercase decoration-primary/30 underline-offset-4 underline">{selectedTx.origem}</p>
+                    <div className="space-y-4">
+                      <div className="flex items-start gap-4">
+                        <User className="mt-1 h-5 w-5 text-primary" />
+                        <div>
+                          <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">
+                            Favorecido / Cargo
+                          </p>
+                          <p className="font-display text-lg font-black leading-tight uppercase">
+                            {selectedTx.favorecido}
+                          </p>
+                          <p className="font-mono text-[10px] font-bold text-muted-foreground uppercase">
+                            {selectedTx.cargo}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-4">
+                        <Tag className="mt-1 h-5 w-5 text-primary" />
+                        <div>
+                          <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">
+                            Categoria / Evento
+                          </p>
+                          <p className="text-sm font-bold uppercase">
+                            {selectedTx.categoria}
+                          </p>
+                          <p className="text-sm text-foreground/80">
+                            {selectedTx.descricao}
+                          </p>
+                        </div>
+                      </div>
+
+                      {selectedTx.origemDestino && (
+                        <div className="flex items-start gap-4">
+                          <MapPin className="mt-1 h-5 w-5 text-primary" />
+                          <div>
+                            <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">
+                              Roteiro / Trecho
+                            </p>
+                            <p className="text-sm font-bold uppercase">
+                              {selectedTx.origemDestino}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex items-start gap-4">
+                        <FileText className="mt-1 h-5 w-5 text-primary" />
+                        <div>
+                          <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">
+                            Documento de Origem
+                          </p>
+                          <p className="text-sm font-bold uppercase underline underline-offset-4 decoration-primary/30">
+                            {selectedTx.origem}
+                          </p>
+                        </div>
+                      </div>
                     </div>
+
+                    <div className="rounded-2xl border border-primary/10 bg-primary/5 p-4">
+                      <div className="mb-3 flex items-center gap-2">
+                        <CreditCard className="h-4 w-4 text-primary" />
+                        <p className="font-mono text-[10px] font-bold tracking-widest text-primary uppercase">
+                          Detalhamento de Custos
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-xs font-medium">
+                          <span className="text-muted-foreground">
+                            Total de Tarifas:
+                          </span>
+                          <span className="font-bold">
+                            {BRL(selectedTx.totalTarifas || 0)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs font-medium">
+                          <span className="text-muted-foreground">
+                            Outras Despesas:
+                          </span>
+                          <span className="font-bold">
+                            {BRL(
+                              (selectedTx.valorTotalDespesas || 0) -
+                                (selectedTx.totalTarifas || 0),
+                            )}
+                          </span>
+                        </div>
+                        <div className="my-1 h-px bg-primary/10" />
+                        <div className="flex justify-between text-sm font-black">
+                          <span className="text-primary">VALOR TOTAL:</span>
+                          <span className="text-primary">
+                            {BRL(selectedTx.valor)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* AI ANALYSIS SECTION */}
+                    <div className="group relative">
+                      <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-primary/20 via-accent/20 to-primary/20 opacity-0 blur transition duration-1000 group-hover:opacity-100" />
+                      <div className="relative space-y-4 rounded-2xl border border-primary/20 bg-primary/[0.02] p-6 backdrop-blur-sm">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 animate-pulse text-primary" />
+                            <h3 className="font-display text-sm font-black tracking-tighter text-primary uppercase">
+                              Análise da Auditoria Social
+                            </h3>
+                          </div>
+                          {!selectedTxExplanation && (
+                            <Button
+                              onClick={() => explainTransaction(selectedTx)}
+                              disabled={explaining}
+                              size="sm"
+                              className="h-8 rounded-lg bg-primary/10 font-mono text-[10px] font-bold text-primary transition-all hover:bg-primary hover:text-white uppercase"
+                            >
+                              {explaining ? (
+                                <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                              ) : (
+                                <Activity className="mr-2 h-3 w-3" />
+                              )}
+                              {explaining ? "Auditando..." : "Explicar Gasto"}
+                            </Button>
+                          )}
+                        </div>
+
+                        {selectedTxExplanation ? (
+                          <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="prose prose-invert prose-xs font-sans max-w-none text-xs leading-relaxed text-foreground/80"
+                          >
+                            <ReactMarkdown>{selectedTxExplanation}</ReactMarkdown>
+                          </motion.div>
+                        ) : (
+                          <p className="text-[10px] italic leading-relaxed text-muted-foreground">
+                            Clique no botão acima para que nossa IA fiscal
+                            analise os pormenores desta movimentação e
+                            identifique possíveis anomalias ou justificativas
+                            legais.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="flex items-center justify-between pt-4 opacity-30">
+                  <p className="font-mono text-[8px] tracking-widest text-muted-foreground uppercase">
+                    ID Auditoria: {selectedTx.id}
+                  </p>
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Info className="h-3 w-3" />
+                    <p className="font-mono text-[8px] tracking-widest uppercase">
+                      Dados verificados via API Pública
+                    </p>
                   </div>
-                </div>
-
-                <div className="rounded-2xl bg-primary/5 p-4 border border-primary/10">
-                   <div className="flex items-center gap-2 mb-3">
-                      <CreditCard className="h-4 w-4 text-primary" />
-                      <p className="font-mono text-[10px] font-bold tracking-widest text-primary uppercase">Detalhamento de Custos</p>
-                   </div>
-                   <div className="space-y-2">
-                      <div className="flex justify-between text-xs font-medium">
-                        <span className="text-muted-foreground">Total de Tarifas:</span>
-                        <span className="font-bold">{BRL(selectedTx.totalTarifas || 0)}</span>
-                      </div>
-                      <div className="flex justify-between text-xs font-medium">
-                        <span className="text-muted-foreground">Outras Despesas:</span>
-                        <span className="font-bold">{BRL((selectedTx.valorTotalDespesas || 0) - (selectedTx.totalTarifas || 0))}</span>
-                      </div>
-                      <div className="h-px bg-primary/10 my-1" />
-                      <div className="flex justify-between text-sm font-black">
-                        <span className="text-primary">VALOR TOTAL:</span>
-                        <span className="text-primary">{BRL(selectedTx.valor)}</span>
-                      </div>
-                   </div>
-                </div>
-
-                <div className="pt-4 flex justify-between items-center opacity-50">
-                   <p className="font-mono text-[8px] uppercase tracking-widest">ID Auditoria: {selectedTx.id}</p>
-                   <p className="font-mono text-[8px] uppercase tracking-widest">Hash: {(selectedTx.id.toString() + "verify").slice(0, 12)}</p>
                 </div>
               </div>
             )}
           </DialogContent>
         </Dialog>
+        <section className="grid gap-6">
+           <CommentsSection />
+        </section>
       </main>
 
       <footer className="mt-12 border-t border-border/40 bg-card/40 py-12 relative overflow-hidden">

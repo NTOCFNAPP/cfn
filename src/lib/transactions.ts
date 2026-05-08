@@ -11,7 +11,7 @@ export type Transaction = {
   totalTarifas?: number;
   origemDestino?: string;
   valorTotalDespesas?: number;
-  raw?: any;
+  raw?: Record<string, unknown>;
 };
 
 export const transactions: Transaction[] = [
