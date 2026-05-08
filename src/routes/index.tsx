@@ -169,55 +169,84 @@ function Dashboard() {
       if (pError) console.error("Erro passagens:", pError);
       if (dError) console.error("Erro deslocamentos:", dError);
 
-      // 3. Mapear e Unificar com parsing robusto de valores
-      const parseValue = (obj: any, keys: string[]): number => {
-        for (const key of keys) {
-          const val = obj[key];
-          if (val !== undefined && val !== null && val !== "") {
-            if (typeof val === 'number') return val;
-            
-            // Tratamento especializado para formato brasileiro (1.234,56)
-            // Remove tudo que não é número, vírgula ou ponto
-            const clean = String(val).trim();
-            
-            // Se tem vírgula e ponto, ponto é milhar e vírgula é decimal
-            if (clean.includes(',') && clean.includes('.')) {
-              return parseFloat(clean.replace(/\./g, '').replace(',', '.'));
-            }
-            
-            // Se tem apenas vírgula e parece decimal (ex: 1234,56)
-            if (clean.includes(',') && clean.indexOf(',') === clean.lastIndexOf(',') && clean.length - clean.indexOf(',') <= 3) {
-              return parseFloat(clean.replace(',', '.'));
-            }
+      // 3. Mapear e Unificar com parsing robusto de valores e chaves
+      const findVal = (obj: any, patterns: string[]): any => {
+        const keys = Object.keys(obj);
+        for (const p of patterns) {
+          const found = keys.find(k => k.toLowerCase() === p.toLowerCase());
+          if (found && obj[found] !== null && obj[found] !== undefined) return obj[found];
+        }
+        // Fallback: search for keys containing the pattern
+        for (const p of patterns) {
+          const found = keys.find(k => k.toLowerCase().includes(p.toLowerCase()));
+          if (found && obj[found] !== null && obj[found] !== undefined) return obj[found];
+        }
+        return null;
+      };
 
-            // Fallback genérico
-            const parsed = parseFloat(clean.replace(/[^\d.-]/g, ''));
-            return isNaN(parsed) ? 0 : parsed;
+      const parseValue = (obj: any, keys: string[]): number => {
+        const raw = findVal(obj, keys);
+        if (raw === null || raw === undefined || raw === "") return 0;
+        if (typeof raw === 'number') return raw;
+        
+        // Limpeza robusta: remove R$, espaços, e trata formatos de milhar/decimal
+        const clean = String(raw).replace(/[^\d.,-]/g, '').trim();
+        if (!clean) return 0;
+
+        // Se tem vírgula e ponto, ponto é milhar e vírgula é decimal (BR: 1.234,56)
+        if (clean.includes(',') && clean.includes('.')) {
+          return parseFloat(clean.replace(/\./g, '').replace(',', '.'));
+        }
+        
+        // Se tem apenas vírgula e parece decimal (ex: 1234,56 ou 1,5)
+        if (clean.includes(',') && clean.indexOf(',') === clean.lastIndexOf(',')) {
+          const parts = clean.split(',');
+          if (parts[1].length <= 2) {
+             return parseFloat(clean.replace(',', '.'));
+          } else {
+             return parseFloat(clean.replace(',', ''));
           }
         }
-        return 0;
+
+        const parsed = parseFloat(clean);
+        return isNaN(parsed) ? 0 : parsed;
+      };
+
+      const parseDate = (obj: any, keys: string[]): string => {
+        const raw = findVal(obj, keys);
+        if (!raw) return new Date().toISOString();
+        
+        const str = String(raw);
+        if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str;
+
+        const match = str.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (match) {
+          return `${match[3]}-${match[2]}-${match[1]}`;
+        }
+
+        return new Date(str).toISOString();
       };
 
       const mappedPassagens: Transaction[] = (passagens || []).map((p: any) => ({
-        id: p.Id || p.IdProcesso || `p-${Math.random()}`,
-        data: p.DataIdaEVoltaFormatada?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
-        cargo: p.TipoPassageiro || "Não Informado",
-        categoria: `Passagem: ${p.CiaAerea || "Aérea"}`,
-        favorecido: p.NomePassageiro || "Anônimo",
-        valor: parseValue(p, ["ValorTotal", "TotalTarifas", "Valor", "TotalTarifasComDesconto", "valor_total", "valorTotal"]),
-        descricao: p.NomeEventoFormatado || "Viagem institucional",
-        origem: `Processo: ${p.CodigoProcesso || "N/A"}`
+        id: findVal(p, ["Id", "IdProcesso", "codigo", "PC"]) || `p-${Math.random()}`,
+        data: parseDate(p, ["DataIdaEVoltaFormatada", "DataIdaEVolta", "DataFim", "Data", "data_inicio", "Data_Ida_E_Volta_Formatada"]),
+        cargo: findVal(p, ["TipoPassageiro", "Cargo", "Ocupacao", "passageiro_tipo"]) || "Não Informado",
+        categoria: `Passagem: ${findVal(p, ["CiaAerea", "Companhia", "Transporte", "Cia_Aerea"]) || "Aérea"}`,
+        favorecido: findVal(p, ["NomePassageiro", "Nome", "Favorecido", "passageiro_nome"]) || "Anônimo",
+        valor: parseValue(p, ["ValorTotal", "TotalTarifas", "Valor", "TotalTarifasComDesconto", "Soma", "Valor_Total"]),
+        descricao: findVal(p, ["NomeEventoFormatado", "Descricao", "Evento", "Nome_Evento_Formatado"]) || "Viagem institucional",
+        origem: `Processo: ${findVal(p, ["CodigoProcesso", "Processo", "Numero", "Codigo_Processo"]) || "N/A"}`
       }));
 
       const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: any) => ({
-        id: d.Id || `d-${Math.random()}`,
-        data: d.DataHoraIda?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
-        cargo: d.TipoPassageiro || "Colaborador",
+        id: findVal(d, ["Id", "id"]) || `d-${Math.random()}`,
+        data: parseDate(d, ["DataHoraIda", "DataHoraIdaFormatada", "Data", "data_deslocamento", "Data_Hora_Ida"]),
+        cargo: findVal(d, ["TipoPassageiro", "Cargo"]) || "Colaborador",
         categoria: "Deslocamento / Diária",
-        favorecido: d.NomePassageiro || "Anônimo",
-        valor: parseValue(d, ["ValorTotalDespesas", "ValorTotal", "Valor", "ProcessoDespesas", "valor_total", "valorTotalDespesas"]),
-        descricao: d.NomeDespesaPadrao || "Despesas de deslocamento",
-        origem: `Evento: ${d.NomeEventoFormatado || "N/A"}`
+        favorecido: findVal(d, ["NomePassageiro", "Favorecido", "Nome"]) || "Anônimo",
+        valor: parseValue(d, ["ValorTotalDespesas", "ValorTotal", "Valor", "ProcessoDespesas", "Soma", "Valor_Total_Despesas"]),
+        descricao: findVal(d, ["NomeDespesaPadrao", "Motivo", "Descricao", "finalidade", "Nome_Despesa_Padrao"]) || "Despesas de deslocamento",
+        origem: `Evento: ${findVal(d, ["NomeEventoFormatado", "Evento", "origem", "Nome_Evento_Formatado"]) || "N/A"}`
       }));
 
       const combined = [...mappedPassagens, ...mappedDeslocamentos].sort(
@@ -422,7 +451,7 @@ function Dashboard() {
                 <div className="mt-6 flex h-12 items-center gap-1 rounded-2xl bg-accent/5 px-4 outline outline-1 outline-accent/20">
                   <Plane className="h-5 w-5 text-accent" />
                   <span className="font-mono text-[9px] font-medium tracking-wide">
-                    84 Emissões este mês
+                    {allTransactions.length} Emissões este mês
                   </span>
                 </div>
               </CardContent>
