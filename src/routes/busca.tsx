@@ -5,6 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { useRealTransactions } from "../hooks/useRealTransactions";
 import { BottomNav } from "@/components/BottomNav";
+import { type Transaction } from "@/lib/transactions";
+import { TransactionDetailDialog } from "@/components/TransactionDetailDialog";
 
 export const Route = createFileRoute("/busca")({
   component: SearchPage,
@@ -24,6 +26,7 @@ const BRL = (v: number) =>
 
 function SearchPage() {
   const [q, setQ] = useState("");
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const { allTransactions, loading } = useRealTransactions();
 
   const results = useMemo(() => {
@@ -74,7 +77,10 @@ function SearchPage() {
           <ul className="space-y-2">
             {results.map((t) => (
               <li key={t.id}>
-                <Card className="rounded-2xl border-border/70 shadow-sm transition-all hover:bg-accent/5">
+                <Card 
+                  className="rounded-2xl border-border/70 shadow-sm transition-all hover:bg-accent/5 cursor-pointer active:scale-[0.98]"
+                  onClick={() => setSelectedTx(t)}
+                >
                   <CardContent className="flex gap-3 p-4">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/20 text-accent ring-1 ring-accent/30">
                       <FileText className="h-5 w-5" />
@@ -110,6 +116,11 @@ function SearchPage() {
           </ul>
         )}
       </main>
+
+      <TransactionDetailDialog 
+        transaction={selectedTx} 
+        onClose={() => setSelectedTx(null)} 
+      />
 
       <BottomNav />
     </div>
