@@ -170,27 +170,41 @@ function Dashboard() {
       if (dError) console.error("Erro deslocamentos:", dError);
 
       // 3. Mapear e Unificar
-      const mappedPassagens: Transaction[] = (passagens || []).map((p: any) => ({
-        id: p.Id || p.IdProcesso || Math.random(),
-        data: p.DataIdaEVoltaFormatada?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
-        cargo: p.TipoPassageiro || "Não Informado",
-        categoria: `Passagem: ${p.CiaAerea || "Aérea"}`,
-        favorecido: p.NomePassageiro || "Anônimo",
-        valor: typeof p.ValorTotal === 'number' ? p.ValorTotal : parseFloat(String(p.ValorTotal || 0).replace(".", "").replace(",", ".")),
-        descricao: p.NomeEventoFormatado || "Viagem institucional",
-        origem: `Processo: ${p.CodigoProcesso || "N/A"}`
-      }));
+      const mappedPassagens: Transaction[] = (passagens || []).map((p: any) => {
+        const valorRaw = p.ValorTotal;
+        const valorNum = typeof valorRaw === 'number' 
+          ? valorRaw 
+          : parseFloat(String(valorRaw || 0).replace(/[^\d,]/g, '').replace(',', '.'));
 
-      const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: any) => ({
-        id: d.Id || Math.random(),
-        data: d.DataHoraIda?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
-        cargo: d.TipoPassageiro || "Colaborador",
-        categoria: "Deslocamento / Diária",
-        favorecido: d.NomePassageiro || "Anônimo",
-        valor: typeof d.ValorTotalDespesas === 'number' ? d.ValorTotalDespesas : parseFloat(String(d.ValorTotalDespesas || 0).replace(".", "").replace(",", ".")),
-        descricao: d.NomeDespesaPadrao || "Despesas de deslocamento",
-        origem: `Evento: ${d.NomeEventoFormatado || "N/A"}`
-      }));
+        return {
+          id: p.Id || p.IdProcesso || `p-${Math.random()}`,
+          data: p.DataIdaEVoltaFormatada?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
+          cargo: p.TipoPassageiro || "Não Informado",
+          categoria: `Passagem: ${p.CiaAerea || "Aérea"}`,
+          favorecido: p.NomePassageiro || "Anônimo",
+          valor: valorNum,
+          descricao: p.NomeEventoFormatado || "Viagem institucional",
+          origem: `Processo: ${p.CodigoProcesso || "N/A"}`
+        };
+      });
+
+      const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: any) => {
+        const valorRaw = d.ValorTotalDespesas;
+        const valorNum = typeof valorRaw === 'number' 
+          ? valorRaw 
+          : parseFloat(String(valorRaw || 0).replace(/[^\d,]/g, '').replace(',', '.'));
+
+        return {
+          id: d.Id || `d-${Math.random()}`,
+          data: d.DataHoraIda?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
+          cargo: d.TipoPassageiro || "Colaborador",
+          categoria: "Deslocamento / Diária",
+          favorecido: d.NomePassageiro || "Anônimo",
+          valor: valorNum,
+          descricao: d.NomeDespesaPadrao || "Despesas de deslocamento",
+          origem: `Evento: ${d.NomeEventoFormatado || "N/A"}`
+        };
+      });
 
       const combined = [...mappedPassagens, ...mappedDeslocamentos].sort(
         (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()
