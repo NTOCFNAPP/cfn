@@ -26,6 +26,7 @@ import {
   TrendingUp,
   Activity,
   ArrowUpRight,
+  Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,7 +35,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { transactions, type Transaction } from "@/lib/transactions";
+import { type Transaction } from "@/lib/transactions";
+import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { BottomNav } from "@/components/BottomNav";
 import { CommentsSection } from "@/components/CommentsSection";
@@ -148,26 +150,88 @@ type Filter = (typeof FILTERS)[number];
 function Dashboard() {
   const [filter, setFilter] = useState<Filter>("Mensal");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const total = transactions.reduce((s, t) => s + t.valor, 0);
-  const totalDiarias = transactions
-    .filter((t) => t.categoria === "Diárias e Passagens")
-    .reduce((s, t) => s + t.valor, 0);
-  const saldoProjetos = 250000 - total;
+  const fetchRealData = async () => {
+    try {
+      setLoading(true);
+      // 1. Buscar Passagens
+      const { data: passagens, error: pError } = await supabase
+        .from("viagens_passagens")
+        .select("*");
+      
+      // 2. Buscar Deslocamentos
+      const { data: deslocamentos, error: dError } = await supabase
+        .from("viagem_deslocamentos")
+        .select("*");
+
+      if (pError) console.error("Erro passagens:", pError);
+      if (dError) console.error("Erro deslocamentos:", dError);
+
+      // 3. Mapear e Unificar
+      const mappedPassagens: Transaction[] = (passagens || []).map((p: any) => ({
+        id: p.Id || Math.random(),
+        // Tenta extrair a primeira data da string "27/04/2026 ... a ... 30/04/2026"
+        data: p.DataIdaEVoltaFormatada?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
+        cargo: p.TipoPassageiro || "Não Informado",
+        categoria: `Passagem: ${p.CiaAerea || "Aérea"}`,
+        favorecido: p.NomePassageiro || "Anônimo",
+        valor: parseFloat(String(p.ValorTotal || 0).replace(",", ".")),
+        descricao: p.NomeEventoFormatado || "Viagem institucional",
+        origem: `Processo: ${p.CodigoProcesso || "N/A"}`
+      }));
+
+      const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: any) => ({
+        id: d.Id || Math.random(),
+        data: d.DataHoraIda?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
+        cargo: d.TipoPassageiro || "Colaborador",
+        categoria: "Deslocamento / Diária",
+        favorecido: d.NomePassageiro || "Anônimo",
+        valor: parseFloat(String(d.ValorTotalDespesas || 0).replace(",", ".")),
+        descricao: d.NomeDespesaPadrao || "Despesas de deslocamento",
+        origem: `Evento: ${d.NomeEventoFormatado || "N/A"}`
+      }));
+
+      const combined = [...mappedPassagens, ...mappedDeslocamentos].sort(
+        (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()
+      );
+
+      setAllTransactions(combined);
+    } catch (error) {
+      console.error("Falha ao carregar dados do dashboard:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRealData();
+  }, []);
+
+  const total = useMemo(() => allTransactions.reduce((s, t) => s + t.valor, 0), [allTransactions]);
+  const totalDiarias = useMemo(() => 
+    allTransactions
+      .filter((t) => t.categoria.includes("Deslocamento"))
+      .reduce((s, t) => s + t.valor, 0)
+  , [allTransactions]);
+  
+  const saldoProjetos = 1500000 - total; // Teto operacional aumentado para dados reais
 
   const byCategory = useMemo(() => {
     const m = new Map<string, number>();
-    transactions.forEach((t) =>
-      m.set(t.categoria, (m.get(t.categoria) ?? 0) + t.valor),
-    );
+    allTransactions.forEach((t) => {
+      const cat = t.categoria.startsWith("Passagem") ? "Passagens Aéreas" : t.categoria;
+      m.set(cat, (m.get(cat) ?? 0) + t.valor);
+    });
     return Array.from(m, ([name, value]) => ({ name, value })).sort(
       (a, b) => b.value - a.value,
     );
-  }, []);
+  }, [allTransactions]);
 
   const byCargo = useMemo(() => {
     const m = new Map<string, Transaction[]>();
-    transactions.forEach((t) => {
+    allTransactions.forEach((t) => {
       const arr = m.get(t.cargo) ?? [];
       arr.push(t);
       m.set(t.cargo, arr);
@@ -177,7 +241,18 @@ function Dashboard() {
       const top = [...items].sort((a, b) => b.valor - a.valor)[0];
       return { cargo, total: totalCargo, top: top.categoria, items };
     });
-  }, []);
+  }, [allTransactions]);
+
+  if (loading) {
+    return (
+      <div className="flex h-screen w-full flex-col items-center justify-center gap-4 bg-background">
+        <Loader2 className="h-12 w-12 animate-spin text-primary opacity-20" />
+        <p className="font-mono text-xs font-bold tracking-widest text-muted-foreground uppercase animate-pulse">
+          Sincronizando Auditoria Social...
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background font-sans text-foreground pb-28 selection:bg-primary/20">
@@ -583,7 +658,7 @@ function Dashboard() {
                        </tr>
                      </thead>
                      <tbody className="divide-y divide-border/10">
-                       {transactions.map((t) => {
+                       {allTransactions.map((t) => {
                          const Icon = CATEGORY_ICONS[t.categoria] ?? Wallet;
                          return (
                            <motion.tr
