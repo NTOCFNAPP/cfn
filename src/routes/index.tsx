@@ -169,43 +169,65 @@ function Dashboard() {
       if (pError) console.error("Erro passagens:", pError);
       if (dError) console.error("Erro deslocamentos:", dError);
 
+      // DEBUG: Ver estrutura das tabelas no console
+      if (passagens && passagens.length > 0) {
+        console.log("Exemplo Passagem:", Object.keys(passagens[0]));
+        console.log("Valores Passagem:", passagens[0]);
+      }
+      if (deslocamentos && deslocamentos.length > 0) {
+        console.log("Exemplo Deslocamento:", Object.keys(deslocamentos[0]));
+      }
+
       // 3. Mapear e Unificar com parsing robusto de valores e chaves
       const findVal = (obj: any, patterns: string[]): any => {
+        if (!obj) return null;
         const keys = Object.keys(obj);
+        
+        // 1. Busca exata (ignorando case e underscores)
+        const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+        
         for (const p of patterns) {
-          const found = keys.find(k => k.toLowerCase() === p.toLowerCase());
+          const np = normalize(p);
+          const found = keys.find(k => normalize(k) === np);
           if (found && obj[found] !== null && obj[found] !== undefined) return obj[found];
         }
-        // Fallback: search for keys containing the pattern
+        
+        // 2. Busca por proximidade parcial
         for (const p of patterns) {
-          const found = keys.find(k => k.toLowerCase().includes(p.toLowerCase()));
+          const np = normalize(p);
+          const found = keys.find(k => normalize(k).includes(np));
           if (found && obj[found] !== null && obj[found] !== undefined) return obj[found];
         }
+
+        // 3. Last Resort: Tentar colunas que comecem com "v" ou "val" ou "total"
+        const moneyLookalikes = keys.find(k => {
+          const lk = k.toLowerCase();
+          return (lk.startsWith("v") || lk.includes("valor") || lk.includes("total") || lk.includes("soma") || lk.includes("vl")) && 
+                 !lk.includes("id") && !lk.includes("nome") && !lk.includes("data") && !lk.includes("tipo");
+        });
+        if (moneyLookalikes && obj[moneyLookalikes] !== null) return obj[moneyLookalikes];
+
         return null;
       };
 
       const parseValue = (obj: any, keys: string[]): number => {
         const raw = findVal(obj, keys);
         if (raw === null || raw === undefined || raw === "") return 0;
-        if (typeof raw === 'number') return raw;
+        if (typeof raw === "number") return raw;
         
-        // Limpeza robusta: remove R$, espaços, e trata formatos de milhar/decimal
-        const clean = String(raw).replace(/[^\d.,-]/g, '').trim();
+        const clean = String(raw).replace(/[^\d.,-]/g, "").trim();
         if (!clean) return 0;
 
-        // Se tem vírgula e ponto, ponto é milhar e vírgula é decimal (BR: 1.234,56)
-        if (clean.includes(',') && clean.includes('.')) {
-          return parseFloat(clean.replace(/\./g, '').replace(',', '.'));
+        if (clean.includes(",") && clean.includes(".")) {
+          return parseFloat(clean.replace(/\./g, "").replace(",", "."));
         }
         
-        // Se tem apenas vírgula e parece decimal (ex: 1234,56 ou 1,5)
-        if (clean.includes(',') && clean.indexOf(',') === clean.lastIndexOf(',')) {
-          const parts = clean.split(',');
-          if (parts[1].length <= 2) {
-             return parseFloat(clean.replace(',', '.'));
-          } else {
-             return parseFloat(clean.replace(',', ''));
+        if (clean.includes(",")) {
+          const parts = clean.split(",");
+          if (parts.length === 2 && parts[1].length <= 2) {
+             return parseFloat(clean.replace(",", "."));
           }
+          return parseFloat(clean.replace(",", ""));
         }
 
         const parsed = parseFloat(clean);
@@ -229,23 +251,23 @@ function Dashboard() {
 
       const mappedPassagens: Transaction[] = (passagens || []).map((p: any) => ({
         id: findVal(p, ["Id", "IdProcesso", "codigo", "PC"]) || `p-${Math.random()}`,
-        data: parseDate(p, ["DataIdaEVoltaFormatada", "DataIdaEVolta", "DataFim", "Data", "data_inicio", "Data_Ida_E_Volta_Formatada"]),
-        cargo: findVal(p, ["TipoPassageiro", "Cargo", "Ocupacao", "passageiro_tipo"]) || "Não Informado",
-        categoria: `Passagem: ${findVal(p, ["CiaAerea", "Companhia", "Transporte", "Cia_Aerea"]) || "Aérea"}`,
+        data: parseDate(p, ["DataIdaEVoltaFormatada", "DataIdaEVolta", "DataFim", "Data", "data_inicio", "Data_Ida_E_Volta_Formatada", "saida"]),
+        cargo: findVal(p, ["TipoPassageiro", "Cargo", "Ocupacao", "passageiro_tipo", "Vinculo"]) || "Não Informado",
+        categoria: `Passagem: ${findVal(p, ["CiaAerea", "Companhia", "Transporte", "Cia_Aerea", "companhia_aerea"]) || "Aérea"}`,
         favorecido: findVal(p, ["NomePassageiro", "Nome", "Favorecido", "passageiro_nome"]) || "Anônimo",
-        valor: parseValue(p, ["ValorTotal", "TotalTarifas", "Valor", "TotalTarifasComDesconto", "Soma", "Valor_Total"]),
-        descricao: findVal(p, ["NomeEventoFormatado", "Descricao", "Evento", "Nome_Evento_Formatado"]) || "Viagem institucional",
-        origem: `Processo: ${findVal(p, ["CodigoProcesso", "Processo", "Numero", "Codigo_Processo"]) || "N/A"}`
+        valor: parseValue(p, ["Valor", "Total", "Tarifa", "Valor_Total", "Soma", "TotalTarifas", "Custo", "vl_total", "vl_tarifa"]),
+        descricao: findVal(p, ["NomeEventoFormatado", "Descricao", "Evento", "Nome_Evento_Formatado", "objetivo", "finalidade"]) || "Viagem institucional",
+        origem: `Processo: ${findVal(p, ["CodigoProcesso", "Processo", "Numero", "Codigo_Processo", "processo_origem", "Num_Processo"]) || "N/A"}`
       }));
 
       const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: any) => ({
         id: findVal(d, ["Id", "id"]) || `d-${Math.random()}`,
-        data: parseDate(d, ["DataHoraIda", "DataHoraIdaFormatada", "Data", "data_deslocamento", "Data_Hora_Ida"]),
-        cargo: findVal(d, ["TipoPassageiro", "Cargo"]) || "Colaborador",
+        data: parseDate(d, ["DataHoraIda", "DataHoraIdaFormatada", "Data", "data_deslocamento", "Data_Hora_Ida", "inicio"]),
+        cargo: findVal(d, ["TipoPassageiro", "Cargo", "Vinculo"]) || "Colaborador",
         categoria: "Deslocamento / Diária",
         favorecido: findVal(d, ["NomePassageiro", "Favorecido", "Nome"]) || "Anônimo",
-        valor: parseValue(d, ["ValorTotalDespesas", "ValorTotal", "Valor", "ProcessoDespesas", "Soma", "Valor_Total_Despesas"]),
-        descricao: findVal(d, ["NomeDespesaPadrao", "Motivo", "Descricao", "finalidade", "Nome_Despesa_Padrao"]) || "Despesas de deslocamento",
+        valor: parseValue(d, ["Valor", "Total", "Custo", "ValorTotalDespesas", "Soma", "Diaria", "Despesa", "vl_total", "vl_diaria"]),
+        descricao: findVal(d, ["NomeDespesaPadrao", "Motivo", "Descricao", "finalidade", "Nome_Despesa_Padrao", "motivo_viagem"]) || "Despesas de deslocamento",
         origem: `Evento: ${findVal(d, ["NomeEventoFormatado", "Evento", "origem", "Nome_Evento_Formatado"]) || "N/A"}`
       }));
 
