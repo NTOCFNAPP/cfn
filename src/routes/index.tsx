@@ -163,7 +163,7 @@ function Dashboard() {
       
       // 2. Buscar Deslocamentos
       const { data: deslocamentos, error: dError } = await supabase
-        .from("viagem_deslocamentos")
+        .from("diarias_deslocamentos")
         .select("*");
 
       if (pError) console.error("Erro passagens:", pError);
@@ -211,27 +211,35 @@ function Dashboard() {
       };
 
       const parseValue = (obj: any, keys: string[]): number => {
-        const raw = findVal(obj, keys);
-        if (raw === null || raw === undefined || raw === "") return 0;
-        if (typeof raw === "number") return raw;
-        
-        const clean = String(raw).replace(/[^\d.,-]/g, "").trim();
-        if (!clean) return 0;
-
-        if (clean.includes(",") && clean.includes(".")) {
-          return parseFloat(clean.replace(/\./g, "").replace(",", "."));
-        }
-        
-        if (clean.includes(",")) {
-          const parts = clean.split(",");
-          if (parts.length === 2 && parts[1].length <= 2) {
-             return parseFloat(clean.replace(",", "."));
+        const _parse = (raw: any): number => {
+          if (raw === null || raw === undefined || raw === "") return 0;
+          if (typeof raw === "number") return raw;
+          const clean = String(raw).replace(/[^\d.,-]/g, "").trim();
+          if (!clean) return 0;
+          if (clean.includes(",") && clean.includes(".")) {
+            return parseFloat(clean.replace(/\./g, "").replace(",", "."));
           }
-          return parseFloat(clean.replace(",", ""));
+          if (clean.includes(",")) {
+            const parts = clean.split(",");
+            if (parts.length === 2 && parts[1].length <= 2) {
+               return parseFloat(clean.replace(",", "."));
+            }
+            return parseFloat(clean.replace(",", ""));
+          }
+          const parsed = parseFloat(clean);
+          return isNaN(parsed) ? 0 : parsed;
+        };
+
+        // 1. Procurar o primeiro valor que não seja zero
+        for (const k of keys) {
+          const val = findVal(obj, [k]);
+          const num = _parse(val);
+          if (num > 0) return num;
         }
 
-        const parsed = parseFloat(clean);
-        return isNaN(parsed) ? 0 : parsed;
+        // 2. Se tudo for zero ou não achar, tenta o "moneyLookalikes" do findVal
+        const fallback = findVal(obj, keys);
+        return _parse(fallback);
       };
 
       const parseDate = (obj: any, keys: string[]): string => {
@@ -255,7 +263,7 @@ function Dashboard() {
         cargo: findVal(p, ["TipoPassageiro", "Cargo", "Ocupacao", "passageiro_tipo", "Vinculo"]) || "Não Informado",
         categoria: `Passagem: ${findVal(p, ["CiaAerea", "Companhia", "Transporte", "Cia_Aerea", "companhia_aerea"]) || "Aérea"}`,
         favorecido: findVal(p, ["NomePassageiro", "Nome", "Favorecido", "passageiro_nome"]) || "Anônimo",
-        valor: parseValue(p, ["Valor", "Total", "Tarifa", "Valor_Total", "Soma", "TotalTarifas", "Custo", "vl_total", "vl_tarifa"]),
+        valor: parseValue(p, ["ValorTotalDespesas", "ValorTotal", "Valor_Total", "TotalTarifas", "Valor", "Total", "Tarifa", "Soma", "Custo", "vl_total", "vl_tarifa"]),
         descricao: findVal(p, ["NomeEventoFormatado", "Descricao", "Evento", "Nome_Evento_Formatado", "objetivo", "finalidade"]) || "Viagem institucional",
         origem: `Processo: ${findVal(p, ["CodigoProcesso", "Processo", "Numero", "Codigo_Processo", "processo_origem", "Num_Processo"]) || "N/A"}`
       }));
@@ -266,7 +274,7 @@ function Dashboard() {
         cargo: findVal(d, ["TipoPassageiro", "Cargo", "Vinculo"]) || "Colaborador",
         categoria: "Deslocamento / Diária",
         favorecido: findVal(d, ["NomePassageiro", "Favorecido", "Nome"]) || "Anônimo",
-        valor: parseValue(d, ["Valor", "Total", "Custo", "ValorTotalDespesas", "Soma", "Diaria", "Despesa", "vl_total", "vl_diaria"]),
+        valor: parseValue(d, ["ValorTotalDespesas", "ValorTotal", "Valor_Total", "Valor", "Total", "Custo", "Soma", "Diaria", "Despesa", "vl_total", "vl_diaria"]),
         descricao: findVal(d, ["NomeDespesaPadrao", "Motivo", "Descricao", "finalidade", "Nome_Despesa_Padrao", "motivo_viagem"]) || "Despesas de deslocamento",
         origem: `Evento: ${findVal(d, ["NomeEventoFormatado", "Evento", "origem", "Nome_Evento_Formatado"]) || "N/A"}`
       }));
