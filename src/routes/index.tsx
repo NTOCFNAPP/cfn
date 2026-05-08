@@ -169,42 +169,56 @@ function Dashboard() {
       if (pError) console.error("Erro passagens:", pError);
       if (dError) console.error("Erro deslocamentos:", dError);
 
-      // 3. Mapear e Unificar
-      const mappedPassagens: Transaction[] = (passagens || []).map((p: any) => {
-        const valorRaw = p.ValorTotal;
-        const valorNum = typeof valorRaw === 'number' 
-          ? valorRaw 
-          : parseFloat(String(valorRaw || 0).replace(/[^\d,]/g, '').replace(',', '.'));
+      // 3. Mapear e Unificar com parsing robusto de valores
+      const parseValue = (obj: any, keys: string[]): number => {
+        for (const key of keys) {
+          const val = obj[key];
+          if (val !== undefined && val !== null && val !== "") {
+            if (typeof val === 'number') return val;
+            
+            // Tratamento especializado para formato brasileiro (1.234,56)
+            // Remove tudo que não é número, vírgula ou ponto
+            const clean = String(val).trim();
+            
+            // Se tem vírgula e ponto, ponto é milhar e vírgula é decimal
+            if (clean.includes(',') && clean.includes('.')) {
+              return parseFloat(clean.replace(/\./g, '').replace(',', '.'));
+            }
+            
+            // Se tem apenas vírgula e parece decimal (ex: 1234,56)
+            if (clean.includes(',') && clean.indexOf(',') === clean.lastIndexOf(',') && clean.length - clean.indexOf(',') <= 3) {
+              return parseFloat(clean.replace(',', '.'));
+            }
 
-        return {
-          id: p.Id || p.IdProcesso || `p-${Math.random()}`,
-          data: p.DataIdaEVoltaFormatada?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
-          cargo: p.TipoPassageiro || "Não Informado",
-          categoria: `Passagem: ${p.CiaAerea || "Aérea"}`,
-          favorecido: p.NomePassageiro || "Anônimo",
-          valor: valorNum,
-          descricao: p.NomeEventoFormatado || "Viagem institucional",
-          origem: `Processo: ${p.CodigoProcesso || "N/A"}`
-        };
-      });
+            // Fallback genérico
+            const parsed = parseFloat(clean.replace(/[^\d.-]/g, ''));
+            return isNaN(parsed) ? 0 : parsed;
+          }
+        }
+        return 0;
+      };
 
-      const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: any) => {
-        const valorRaw = d.ValorTotalDespesas;
-        const valorNum = typeof valorRaw === 'number' 
-          ? valorRaw 
-          : parseFloat(String(valorRaw || 0).replace(/[^\d,]/g, '').replace(',', '.'));
+      const mappedPassagens: Transaction[] = (passagens || []).map((p: any) => ({
+        id: p.Id || p.IdProcesso || `p-${Math.random()}`,
+        data: p.DataIdaEVoltaFormatada?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
+        cargo: p.TipoPassageiro || "Não Informado",
+        categoria: `Passagem: ${p.CiaAerea || "Aérea"}`,
+        favorecido: p.NomePassageiro || "Anônimo",
+        valor: parseValue(p, ["ValorTotal", "TotalTarifas", "Valor", "TotalTarifasComDesconto", "valor_total", "valorTotal"]),
+        descricao: p.NomeEventoFormatado || "Viagem institucional",
+        origem: `Processo: ${p.CodigoProcesso || "N/A"}`
+      }));
 
-        return {
-          id: d.Id || `d-${Math.random()}`,
-          data: d.DataHoraIda?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
-          cargo: d.TipoPassageiro || "Colaborador",
-          categoria: "Deslocamento / Diária",
-          favorecido: d.NomePassageiro || "Anônimo",
-          valor: valorNum,
-          descricao: d.NomeDespesaPadrao || "Despesas de deslocamento",
-          origem: `Evento: ${d.NomeEventoFormatado || "N/A"}`
-        };
-      });
+      const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: any) => ({
+        id: d.Id || `d-${Math.random()}`,
+        data: d.DataHoraIda?.split(" ")[0]?.split("/").reverse().join("-") || new Date().toISOString(),
+        cargo: d.TipoPassageiro || "Colaborador",
+        categoria: "Deslocamento / Diária",
+        favorecido: d.NomePassageiro || "Anônimo",
+        valor: parseValue(d, ["ValorTotalDespesas", "ValorTotal", "Valor", "ProcessoDespesas", "valor_total", "valorTotalDespesas"]),
+        descricao: d.NomeDespesaPadrao || "Despesas de deslocamento",
+        origem: `Evento: ${d.NomeEventoFormatado || "N/A"}`
+      }));
 
       const combined = [...mappedPassagens, ...mappedDeslocamentos].sort(
         (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()
