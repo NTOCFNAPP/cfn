@@ -46,7 +46,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { type Transaction } from "@/lib/transactions";
-import { useRealTransactions } from "@/hooks/useRealTransactions";
+import { useRealTransactions } from "../hooks/useRealTransactions";
 
 export const Route = createFileRoute("/")({
   component: Dashboard,

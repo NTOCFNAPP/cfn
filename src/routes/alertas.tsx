@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Bell, Lightbulb, TrendingUp, TrendingDown, ShieldCheck, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { useRealTransactions } from "@/hooks/useRealTransactions";
+import { useRealTransactions } from "../hooks/useRealTransactions";
 import { BottomNav } from "@/components/BottomNav";
 import { cn } from "@/lib/utils";
 import { useMemo } from "react";

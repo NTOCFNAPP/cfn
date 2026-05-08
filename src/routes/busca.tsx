@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Search, StickyNote, FileText, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { useRealTransactions } from "@/hooks/use-RealTransactions";
+import { useRealTransactions } from "../hooks/useRealTransactions";
 import { BottomNav } from "@/components/BottomNav";
 
 export const Route = createFileRoute("/busca")({
