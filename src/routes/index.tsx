@@ -203,18 +203,20 @@ function Dashboard() {
         const _parse = (raw: unknown): number => {
           if (raw === null || raw === undefined || raw === "") return 0;
           if (typeof raw === "number") return raw;
-          const clean = String(raw).replace(/[^\d.,-]/g, "").trim();
+          
+          let clean = String(raw).replace(/[^\d.,-]/g, "").trim();
           if (!clean) return 0;
+
+          // Se tem ponto E vírgula, assume formato Brasil 1.234,56
           if (clean.includes(",") && clean.includes(".")) {
             return parseFloat(clean.replace(/\./g, "").replace(",", "."));
           }
+
+          // Se tem apenas vírgula, é o separador decimal (ex: 5770,9600)
           if (clean.includes(",")) {
-            const parts = clean.split(",");
-            if (parts.length === 2 && parts[1].length <= 2) {
-               return parseFloat(clean.replace(",", "."));
-            }
-            return parseFloat(clean.replace(",", ""));
+            return parseFloat(clean.replace(",", "."));
           }
+
           const parsed = parseFloat(clean);
           return isNaN(parsed) ? 0 : parsed;
         };
