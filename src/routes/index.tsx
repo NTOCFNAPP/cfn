@@ -26,6 +26,8 @@ import {
   Tag,
   CreditCard,
   Info,
+  Cog,
+  GraduationCap,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
