@@ -27,6 +27,11 @@ import {
   Activity,
   ArrowUpRight,
   Loader2,
+  MapPin,
+  User,
+  FileText,
+  Tag,
+  CreditCard,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +40,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { type Transaction } from "@/lib/transactions";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
@@ -150,6 +161,7 @@ type Filter = (typeof FILTERS)[number];
 function Dashboard() {
   const [filter, setFilter] = useState<Filter>("Mensal");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -169,17 +181,8 @@ function Dashboard() {
       if (pError) console.error("Erro passagens:", pError);
       if (dError) console.error("Erro deslocamentos:", dError);
 
-      // DEBUG: Ver estrutura das tabelas no console
-      if (passagens && passagens.length > 0) {
-        console.log("Exemplo Passagem:", Object.keys(passagens[0]));
-        console.log("Valores Passagem:", passagens[0]);
-      }
-      if (deslocamentos && deslocamentos.length > 0) {
-        console.log("Exemplo Deslocamento:", Object.keys(deslocamentos[0]));
-      }
-
       // 3. Mapear e Unificar com parsing robusto de valores e chaves
-      const findVal = (obj: any, patterns: string[]): any => {
+      const findVal = (obj: Record<string, any>, patterns: string[]): any => {
         if (!obj) return null;
         const keys = Object.keys(obj);
         
@@ -199,18 +202,10 @@ function Dashboard() {
           if (found && obj[found] !== null && obj[found] !== undefined) return obj[found];
         }
 
-        // 3. Last Resort: Tentar colunas que comecem com "v" ou "val" ou "total"
-        const moneyLookalikes = keys.find(k => {
-          const lk = k.toLowerCase();
-          return (lk.startsWith("v") || lk.includes("valor") || lk.includes("total") || lk.includes("soma") || lk.includes("vl")) && 
-                 !lk.includes("id") && !lk.includes("nome") && !lk.includes("data") && !lk.includes("tipo");
-        });
-        if (moneyLookalikes && obj[moneyLookalikes] !== null) return obj[moneyLookalikes];
-
         return null;
       };
 
-      const parseValue = (obj: any, keys: string[]): number => {
+      const parseValue = (obj: Record<string, any>, keys: string[]): number => {
         const _parse = (raw: any): number => {
           if (raw === null || raw === undefined || raw === "") return 0;
           if (typeof raw === "number") return raw;
@@ -230,19 +225,25 @@ function Dashboard() {
           return isNaN(parsed) ? 0 : parsed;
         };
 
-        // 1. Procurar o primeiro valor que não seja zero
         for (const k of keys) {
           const val = findVal(obj, [k]);
           const num = _parse(val);
           if (num > 0) return num;
         }
 
-        // 2. Se tudo for zero ou não achar, tenta o "moneyLookalikes" do findVal
         const fallback = findVal(obj, keys);
         return _parse(fallback);
       };
 
-      const parseDate = (obj: any, keys: string[]): string => {
+      const parseCargo = (obj: Record<string, any>, keys: string[]): string => {
+        const val = findVal(obj, keys);
+        if (!val) return "Colaborador";
+        const s = String(val).trim();
+        if (/^[\d,.-]+$/.test(s) || s.length < 2) return "Colaborador";
+        return s;
+      };
+
+      const parseDate = (obj: Record<string, any>, keys: string[]): string => {
         const raw = findVal(obj, keys);
         if (!raw) return new Date().toISOString();
         
@@ -257,27 +258,42 @@ function Dashboard() {
         return new Date(str).toISOString();
       };
 
-      const mappedPassagens: Transaction[] = (passagens || []).map((p: any) => ({
-        id: findVal(p, ["Id", "IdProcesso", "codigo", "PC"]) || `p-${Math.random()}`,
-        data: parseDate(p, ["DataIdaEVoltaFormatada", "DataIdaEVolta", "DataFim", "Data", "data_inicio", "Data_Ida_E_Volta_Formatada", "saida"]),
-        cargo: findVal(p, ["TipoPassageiro", "Cargo", "Ocupacao", "passageiro_tipo", "Vinculo"]) || "Não Informado",
-        categoria: `Passagem: ${findVal(p, ["CiaAerea", "Companhia", "Transporte", "Cia_Aerea", "companhia_aerea"]) || "Aérea"}`,
-        favorecido: findVal(p, ["NomePassageiro", "Nome", "Favorecido", "passageiro_nome"]) || "Anônimo",
-        valor: parseValue(p, ["ValorTotalDespesas", "ValorTotal", "Valor_Total", "TotalTarifas", "Valor", "Total", "Tarifa", "Soma", "Custo", "vl_total", "vl_tarifa"]),
-        descricao: findVal(p, ["NomeEventoFormatado", "Descricao", "Evento", "Nome_Evento_Formatado", "objetivo", "finalidade"]) || "Viagem institucional",
-        origem: `Processo: ${findVal(p, ["CodigoProcesso", "Processo", "Numero", "Codigo_Processo", "processo_origem", "Num_Processo"]) || "N/A"}`
-      }));
+      const mappedPassagens: Transaction[] = (passagens || []).map((p: any) => {
+        const totalDespesas = parseValue(p, ["ValorTotalDespesas", "ValorTotal", "Valor"]);
+        const tarifas = parseValue(p, ["TotalTarifas", "Tarifa", "Valor"]);
+        return {
+          id: findVal(p, ["Id", "IdProcesso", "id_pk", "IdProcessoPassagem"]) || `p-${Math.random()}`,
+          data: parseDate(p, ["DataIdaEVoltaFormatada", "DataHoraIda"]),
+          cargo: parseCargo(p, ["TipoPassageiro", "Cargo", "Ocupacao"]),
+          categoria: `Passagem: ${findVal(p, ["CiaAerea", "Companhia"]) || "Aérea"}`,
+          favorecido: findVal(p, ["NomePassageiro", "Nome"]) || "Anônimo",
+          valor: totalDespesas || tarifas || 0,
+          descricao: findVal(p, ["NomeEventoFormatado", "Descricao"]) || "Viagem institucional",
+          origem: findVal(p, ["CodigoProcesso", "Num_Processo"]) || "Processo N/A",
+          ciaAerea: findVal(p, ["CiaAerea", "Companhia"]),
+          totalTarifas: tarifas,
+          origemDestino: findVal(p, ["OrigemDestinoFormatado", "Rota"]),
+          valorTotalDespesas: totalDespesas,
+          raw: p
+        };
+      });
 
-      const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: any) => ({
-        id: findVal(d, ["Id", "id"]) || `d-${Math.random()}`,
-        data: parseDate(d, ["DataHoraIda", "DataHoraIdaFormatada", "Data", "data_deslocamento", "Data_Hora_Ida", "inicio"]),
-        cargo: findVal(d, ["TipoPassageiro", "Cargo", "Vinculo"]) || "Colaborador",
-        categoria: "Deslocamento / Diária",
-        favorecido: findVal(d, ["NomePassageiro", "Favorecido", "Nome"]) || "Anônimo",
-        valor: parseValue(d, ["ValorTotalDespesas", "ValorTotal", "Valor_Total", "Valor", "Total", "Custo", "Soma", "Diaria", "Despesa", "vl_total", "vl_diaria"]),
-        descricao: findVal(d, ["NomeDespesaPadrao", "Motivo", "Descricao", "finalidade", "Nome_Despesa_Padrao", "motivo_viagem"]) || "Despesas de deslocamento",
-        origem: `Evento: ${findVal(d, ["NomeEventoFormatado", "Evento", "origem", "Nome_Evento_Formatado"]) || "N/A"}`
-      }));
+      const mappedDeslocamentos: Transaction[] = (deslocamentos || []).map((d: any) => {
+        const totalDespesas = parseValue(d, ["ValorTotalDespesas", "ValorTotal", "Valor"]);
+        const diarias = parseValue(d, ["Diaria", "vl_diaria", "Valor"]);
+        return {
+          id: findVal(d, ["Id", "id", "id_pk"]) || `d-${Math.random()}`,
+          data: parseDate(d, ["DataHoraIda", "Data"]),
+          cargo: parseCargo(d, ["TipoPassageiro", "Cargo", "Vinculo"]),
+          categoria: "Deslocamento / Diária",
+          favorecido: findVal(d, ["NomePassageiro", "Nome"]) || "Anônimo",
+          valor: totalDespesas || diarias || 0,
+          descricao: findVal(d, ["NomeDespesaPadrao", "Motivo", "Descricao"]) || "Despesas de deslocamento",
+          origem: findVal(d, ["NomeEventoFormatado", "Evento"]) || "Evento N/A",
+          valorTotalDespesas: totalDespesas || diarias,
+          raw: d
+        };
+      });
 
       const combined = [...mappedPassagens, ...mappedDeslocamentos].sort(
         (a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()
@@ -318,15 +334,16 @@ function Dashboard() {
   const byCargo = useMemo(() => {
     const m = new Map<string, Transaction[]>();
     allTransactions.forEach((t) => {
-      const arr = m.get(t.cargo) ?? [];
+      const cargo = t.cargo || "Colaborador";
+      const arr = m.get(cargo) ?? [];
       arr.push(t);
-      m.set(t.cargo, arr);
+      m.set(cargo, arr);
     });
     return Array.from(m, ([cargo, items]) => {
       const totalCargo = items.reduce((s, t) => s + t.valor, 0);
       const top = [...items].sort((a, b) => b.valor - a.valor)[0];
       return { cargo, total: totalCargo, top: top.categoria, items };
-    });
+    }).sort((a, b) => b.total - a.total);
   }, [allTransactions]);
 
   if (loading) {
@@ -699,13 +716,15 @@ function Dashboard() {
                               {c.items.map((it) => (
                                 <div
                                   key={it.id}
-                                  className="flex items-start justify-between gap-4 border-b border-border/10 pb-3 last:border-0 last:pb-0 font-sans"
+                                  onClick={() => setSelectedTx(it)}
+                                  className="group/item flex cursor-pointer items-start justify-between gap-4 border-b border-border/10 pb-3 last:border-0 last:pb-0 font-sans hover:bg-primary/[0.03] p-2 rounded-xl transition-colors"
                                 >
                                   <div className="space-y-1">
-                                    <div className="text-sm font-bold text-foreground/80">
+                                    <div className="text-sm font-bold text-foreground/80 group-hover/item:text-primary transition-colors">
                                       {it.descricao}
                                     </div>
-                                    <div className="font-mono text-[10px] text-muted-foreground uppercase tracking-wider">
+                                    <div className="font-mono text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                                      <FileText className="h-3 w-3" />
                                       {it.origem} · {new Date(it.data).toLocaleDateString()}
                                     </div>
                                   </div>
@@ -751,26 +770,30 @@ function Dashboard() {
                              initial={{ opacity: 0 }}
                              whileInView={{ opacity: 1 }}
                              key={t.id}
-                             className="group hover:bg-primary/[0.02] transition-colors"
+                             onClick={() => setSelectedTx(t)}
+                             className="group cursor-pointer hover:bg-primary/[0.04] transition-colors"
                            >
                              <td className="px-8 py-5 font-mono text-[10px] text-muted-foreground">
                                {new Date(t.data).toLocaleDateString("pt-BR")}
                              </td>
                              <td className="px-4 py-5">
                                <div className="flex items-center gap-4">
-                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/5 text-accent ring-1 ring-accent/10">
+                                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/5 text-accent ring-1 ring-accent/10 transition-transform group-hover:scale-110">
                                     <Icon className="h-5 w-5" />
                                   </div>
                                   <div>
-                                    <div className="font-display text-sm font-bold truncate max-w-[200px] md:max-w-xs">{t.favorecido}</div>
-                                    <div className="font-mono text-[9px] text-muted-foreground uppercase">{t.cargo}</div>
+                                    <div className="font-display text-sm font-bold text-foreground group-hover:text-primary transition-colors">{t.favorecido}</div>
+                                    <div className="font-mono text-[9px] text-muted-foreground uppercase">{t.descricao}</div>
                                   </div>
                                </div>
                              </td>
                              <td className="px-4 py-5">
-                                <span className="inline-flex items-center rounded-full bg-border/20 px-3 py-1 text-[10px] font-bold uppercase tracking-tighter text-foreground/70">
-                                  {t.categoria}
-                                </span>
+                                <div className="space-y-1">
+                                   <span className="inline-flex items-center rounded-full bg-border/20 px-3 py-0.5 text-[9px] font-bold uppercase tracking-tighter text-foreground/70">
+                                     {t.categoria}
+                                   </span>
+                                   <div className="font-mono text-[9px] text-muted-foreground/60 uppercase pl-1">{t.cargo}</div>
+                                </div>
                              </td>
                              <td className="px-8 py-5 text-right font-display text-base font-black text-primary">
                                {BRL(t.valor)}
@@ -789,6 +812,102 @@ function Dashboard() {
         <section className="grid gap-6">
            <CommentsSection />
         </section>
+
+        {/* TRANSACTION DETAIL DIALOG */}
+        <Dialog open={!!selectedTx} onOpenChange={(open) => !open && setSelectedTx(null)}>
+          <DialogContent className="max-w-xl border-primary/20 bg-card/95 p-0 overflow-hidden backdrop-blur-2xl">
+            <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-primary via-accent to-primary" />
+            
+            <DialogHeader className="p-8 pb-4">
+              <DialogTitle className="flex items-center gap-3 font-display text-2xl font-black uppercase italic tracking-tight">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <ShieldCheck className="h-6 w-6" />
+                </div>
+                Dossiê de Movimentação
+              </DialogTitle>
+            </DialogHeader>
+
+            {selectedTx && (
+              <div className="space-y-6 p-8 pt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5 rounded-2xl border border-border/40 bg-muted/30 p-4">
+                     <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Valor Auditado</p>
+                     <p className="font-display text-2xl font-black text-primary">{BRL(selectedTx.valor)}</p>
+                  </div>
+                  <div className="space-y-1.5 rounded-2xl border border-border/40 bg-muted/30 p-4">
+                     <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Data da Operação</p>
+                     <p className="font-display text-lg font-bold">{new Date(selectedTx.data).toLocaleDateString("pt-BR")}</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-start gap-4">
+                    <User className="mt-1 h-5 w-5 text-primary" />
+                    <div>
+                      <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Favorecido / Cargo</p>
+                      <p className="font-display text-lg font-black leading-tight uppercase">{selectedTx.favorecido}</p>
+                      <p className="font-mono text-[10px] text-muted-foreground uppercase font-bold">{selectedTx.cargo}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-4">
+                    <Tag className="mt-1 h-5 w-5 text-primary" />
+                    <div>
+                      <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Categoria / Evento</p>
+                      <p className="text-sm font-bold uppercase">{selectedTx.categoria}</p>
+                      <p className="text-sm text-foreground/80">{selectedTx.descricao}</p>
+                    </div>
+                  </div>
+
+                  {selectedTx.origemDestino && (
+                    <div className="flex items-start gap-4">
+                      <MapPin className="mt-1 h-5 w-5 text-primary" />
+                      <div>
+                        <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Roteiro / Trecho</p>
+                        <p className="text-sm font-bold uppercase">{selectedTx.origemDestino}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-start gap-4">
+                    <FileText className="mt-1 h-5 w-5 text-primary" />
+                    <div>
+                      <p className="font-mono text-[9px] font-bold tracking-widest text-muted-foreground uppercase">Documento de Origem</p>
+                      <p className="text-sm font-bold uppercase decoration-primary/30 underline-offset-4 underline">{selectedTx.origem}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-primary/5 p-4 border border-primary/10">
+                   <div className="flex items-center gap-2 mb-3">
+                      <CreditCard className="h-4 w-4 text-primary" />
+                      <p className="font-mono text-[10px] font-bold tracking-widest text-primary uppercase">Detalhamento de Custos</p>
+                   </div>
+                   <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-medium">
+                        <span className="text-muted-foreground">Total de Tarifas:</span>
+                        <span className="font-bold">{BRL(selectedTx.totalTarifas || 0)}</span>
+                      </div>
+                      <div className="flex justify-between text-xs font-medium">
+                        <span className="text-muted-foreground">Outras Despesas:</span>
+                        <span className="font-bold">{BRL((selectedTx.valorTotalDespesas || 0) - (selectedTx.totalTarifas || 0))}</span>
+                      </div>
+                      <div className="h-px bg-primary/10 my-1" />
+                      <div className="flex justify-between text-sm font-black">
+                        <span className="text-primary">VALOR TOTAL:</span>
+                        <span className="text-primary">{BRL(selectedTx.valor)}</span>
+                      </div>
+                   </div>
+                </div>
+
+                <div className="pt-4 flex justify-between items-center opacity-50">
+                   <p className="font-mono text-[8px] uppercase tracking-widest">ID Auditoria: {selectedTx.id}</p>
+                   <p className="font-mono text-[8px] uppercase tracking-widest">Hash: {(selectedTx.id.toString() + "verify").slice(0, 12)}</p>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </main>
 
       <footer className="mt-12 border-t border-border/40 bg-card/40 py-12 relative overflow-hidden">

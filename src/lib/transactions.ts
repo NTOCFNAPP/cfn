@@ -1,5 +1,5 @@
 export type Transaction = {
-  id: number;
+  id: string | number;
   data: string;
   cargo: string;
   categoria: string;
@@ -7,6 +7,11 @@ export type Transaction = {
   valor: number;
   descricao: string;
   origem: string;
+  ciaAerea?: string;
+  totalTarifas?: number;
+  origemDestino?: string;
+  valorTotalDespesas?: number;
+  raw?: any;
 };
 
 export const transactions: Transaction[] = [
