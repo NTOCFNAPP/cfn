@@ -37,6 +37,7 @@ import {
 import { transactions, type Transaction } from "@/lib/transactions";
 import { cn } from "@/lib/utils";
 import { BottomNav } from "@/components/BottomNav";
+import { CommentsSection } from "@/components/CommentsSection";
 
 export const Route = createFileRoute("/")({
   component: Dashboard,
@@ -621,6 +622,11 @@ function Dashboard() {
                  </div>
               </CardContent>
            </Card>
+        </section>
+
+        {/* AUDITORIA SOCIAL - COMENTÁRIOS */}
+        <section className="grid gap-6">
+           <CommentsSection />
         </section>
       </main>
 
